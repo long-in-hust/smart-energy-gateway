@@ -25,20 +25,19 @@ services:
     container_name: mosquitto-init
     volumes:
       - mosquitto-config:/mosquitto/config
-    entrypoint: >
-      sh -c "
-        cp /tmp/mosquitto.conf /mosquitto/config/mosquitto.conf &&
-        mosquitto_passwd -b /mosquitto/config/passwd
-          $${MQTT_USERNAME:-energy_user}
-          $${MQTT_PASSWORD:-energy_pass123} &&
-        echo 'Mosquitto password file created'
-      "
     environment:
       MQTT_USERNAME: "${MQTT_USERNAME:-energy_user}"
       MQTT_PASSWORD: "${MQTT_PASSWORD:-energy_pass123}"
     configs:
       - source: mosquitto_conf
         target: /tmp/mosquitto.conf
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        cp /tmp/mosquitto.conf /mosquitto/config/mosquitto.conf
+        mosquitto_passwd -c -b /mosquitto/config/passwd "$${MQTT_USERNAME}" "$${MQTT_PASSWORD}"
+        echo 'Mosquitto password file created successfully'
     restart: "no"
 
   mosquitto:
