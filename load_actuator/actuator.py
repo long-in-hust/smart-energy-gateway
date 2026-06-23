@@ -100,7 +100,6 @@ def main():
 
     client = mqtt.Client(
         client_id=f"actuator-{LOAD_ID}-{int(time.time())}",
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
     )
     if MQTT_USERNAME:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)

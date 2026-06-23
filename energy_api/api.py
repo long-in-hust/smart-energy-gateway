@@ -65,7 +65,6 @@ def get_mqtt() -> mqtt.Client:
     if _mqtt_client is None or not _mqtt_client.is_connected():
         client = mqtt.Client(
             client_id=f"energy-api-{int(time.time())}",
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         )
         if MQTT_USERNAME:
             client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)

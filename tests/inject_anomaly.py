@@ -29,7 +29,6 @@ def ts():
 def connect():
     client = mqtt.Client(
         client_id="anomaly-injector",
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
     )
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     client.connect(MQTT_BROKER, MQTT_PORT)

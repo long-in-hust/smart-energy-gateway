@@ -307,7 +307,7 @@ volumes:
   grafana-data:
   mosquitto-data:
   mosquitto-logs:
-  mosquitto-config:
+  mosquitto-config:import paho.mqtt.client as mqtt
   gateway-state:
 
 # ── Configs ───────────────────────────────────────────────────────────────────

@@ -145,7 +145,6 @@ def main():
     client = mqtt.Client(
         client_id=f"meter-{LOAD_ID}-{int(time.time())}",
         userdata={"client": None},
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
     )
     client.user_data_set({"client": client})
 
