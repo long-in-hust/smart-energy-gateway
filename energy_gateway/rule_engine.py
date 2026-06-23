@@ -72,6 +72,7 @@ class RuleEngine:
 
         # ── Rule 2: Overload detection ───────────────────────────────────────
         if total_power > self.overload_threshold:
+            # create a rule event
             event = RuleEvent(
                 event_type="overload_detected",
                 severity="warning",
@@ -91,6 +92,7 @@ class RuleEngine:
             shed_power = 0.0
             shed_actions = []
             for load_id, s in active_loads:
+                # Shed enough loads to bring total_power below threshold
                 if total_power - shed_power <= self.overload_threshold:
                     break
                 if s.get("priority", "low") == "high":
