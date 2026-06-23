@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ============================================================
 # Smart Energy Management Gateway
 # Run: docker compose up -d --build
@@ -307,7 +305,7 @@ volumes:
   grafana-data:
   mosquitto-data:
   mosquitto-logs:
-  mosquitto-config:import paho.mqtt.client as mqtt
+  mosquitto-config:
   gateway-state:
 
 # ── Configs ───────────────────────────────────────────────────────────────────
