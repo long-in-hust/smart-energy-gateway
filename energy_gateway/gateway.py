@@ -148,10 +148,10 @@ def normalise_meter(raw: dict) -> dict:
     return {
         "device_id":     str(raw.get("device_id", "")),
         "load_id":       str(raw.get("load_id", "")),
-        "voltage":       float(raw.get("voltage", 220.0)),
-        "current_ampere": float(raw.get("current_ampere", 0.0)),
-        "power_watt":    float(raw.get("power_watt", 0.0)),
-        "energy_wh":     float(raw.get("energy_wh", 0.0)),
+        "voltage":       round(float(raw.get("voltage", 220.00)), 2),
+        "current_ampere": round(float(raw.get("current_ampere", 0.00)), 2),
+        "power_watt":    round(float(raw.get("power_watt", 0.00)), 2),
+        "energy_wh":     round(float(raw.get("energy_wh", 0.00)), 2),
         "priority":      str(raw.get("priority", "low")),
         "switch":        str(raw.get("switch", "on")),
         "timestamp":     str(raw.get("timestamp", "")),
@@ -280,9 +280,9 @@ class EnergyGateway:
 
         # Publish summary
         summary = {
-            "total_power_watt": total_power,
+            "total_power_watt": round(total_power, 2),
             "solar_power_watt": round(solar_power, 2),
-            "grid_power_watt":  grid_power,
+            "grid_power_watt":  round(grid_power, 2),
             "overload":         total_power > OVERLOAD_THRESHOLD,
             "timestamp":        now,
         }
