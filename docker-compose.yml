@@ -190,6 +190,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+  
+  meter-hvac-2:
+    build:
+      context: ./smart_meter
+      dockerfile: Dockerfile
+    container_name: meter-hvac-2
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      <<: *mqtt-env
+      LOAD_ID: "${HVAC_2_LOAD_ID:-hvac-2}"
+      DEVICE_ID: "${HVAC_2_DEVICE_ID:-meter-hvac-2}"
+      BASE_POWER: "${HVAC_2_BASE_POWER:-1800.0}"
+      PRIORITY: "${HVAC_2_PRIORITY:-high}"
+      PUBLISH_INTERVAL: "${PUBLISH_INTERVAL:-5}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('mosquitto', 1883), 3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
 
   # ── Smart Meter: Lighting ─────────────────────────────────────────────────
   meter-lighting:
@@ -307,7 +331,7 @@ volumes:
   grafana-data:
   mosquitto-data:
   mosquitto-logs:
-  mosquitto-config:import paho.mqtt.client as mqtt
+  mosquitto-config:
   gateway-state:
 
 # ── Configs ───────────────────────────────────────────────────────────────────
