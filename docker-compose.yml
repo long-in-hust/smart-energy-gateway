@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ============================================================
 # Smart Energy Management Gateway
 # Run: docker compose up -d --build

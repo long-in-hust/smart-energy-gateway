@@ -8,108 +8,296 @@
 
 ## 📋 Mô tả hệ thống
 
-Hệ thống giám sát và điều khiển điện năng thông minh ảo hóa hoàn toàn bằng phần mềm. Gồm:
+Hệ thống giả lập việc quản lý điện năng cho một ngôi nhà thông minh (smart home). Toàn bộ thiết bị đều là phần mềm Python chạy trong Docker container — không cần phần cứng thật.
 
-- **3 Smart Meter** giả lập (HVAC, Lighting, Plug) — publish telemetry qua MQTT mỗi 5 giây
-- **3 Load Actuator** giả lập — nhận lệnh on/off, publish status về
-- **1 Solar Simulator** — mô phỏng đường cong công suất mặt trời theo chu kỳ ngày/đêm
-- **Energy Gateway** — validate, normalize, chạy rule engine, ghi InfluxDB, publish summary
-- **REST API** — truy vấn trạng thái, điều khiển thủ công
-- **Grafana Dashboard** — hiển thị realtime power, events, load status
+**Ý tưởng chính:** Nhà có 3 nhóm thiết bị tiêu thụ điện (điều hòa, đèn, ổ cắm) và 1 tấm pin mặt trời. Một gateway trung tâm theo dõi tổng công suất tiêu thụ, nếu vượt ngưỡng 3500W thì tự động tắt bớt thiết bị ít quan trọng để tránh quá tải. Khi mặt trời phát điện nhiều, gateway bật lại các thiết bị đã tắt trước đó.
+
+### Các thành phần
+
+| Thành phần | Giải thích |
+|------------|------------|
+| `meter-hvac` | Giả lập đồng hồ đo điện của điều hòa — publish số liệu lên MQTT mỗi 5 giây |
+| `meter-lighting` | Giả lập đồng hồ đo điện của hệ thống đèn |
+| `meter-plug` | Giả lập đồng hồ đo điện của tất cả thiết bị cắm ổ cắm (TV, tủ lạnh, máy tính...) |
+| `solar-simulator` | Giả lập tấm pin mặt trời — công suất tăng dần từ 6h sáng, đạt đỉnh trưa, về 0 lúc 18h |
+| `load-hvac/lighting/plug` | Giả lập công tắc điện — nhận lệnh bật/tắt từ gateway, phản hồi trạng thái |
+| `energy-gateway` | Bộ não hệ thống — nhận dữ liệu từ tất cả meter, phân tích, ra lệnh điều khiển |
+| `energy-api` | REST API để xem trạng thái và điều khiển thủ công qua HTTP |
+| `mosquitto` | MQTT broker — trung gian chuyển message giữa tất cả service |
+| `influxdb` | Database lưu toàn bộ dữ liệu theo thời gian |
+| `grafana` | Dashboard hiển thị đồ thị realtime |
 
 ---
 
-## 🏗️ Kiến trúc luồng dữ liệu
+## 🏗️ Luồng dữ liệu
 
 ```
-[meter-hvac]    ─┐
-[meter-lighting] ├──► energy/{load}/meter/telemetry ──► [energy-gateway]
-[meter-plug]    ─┘                                           │
-[solar-sim]     ──► energy/solar/telemetry ─────────────────┤
-                                                             │
-                     ┌───────────────────────────────────────┤
-                     │  Validate → Normalize → Rule Engine   │
-                     │  → InfluxDB write                     │
-                     └───────────────────────────────────────┤
-                                                             │
-          energy/{load}/load/command ◄───────────────────────┤
-          energy/gateway/summary ◄───────────────────────────┤
-          energy/gateway/event ◄─────────────────────────────┘
-                     │
-          [load-hvac / load-lighting / load-plug]
-                     │
-          energy/{load}/load/status ────────────────────────► [energy-gateway]
-                                                                     │
-                                                              [InfluxDB] ← [Grafana]
-                                                                     │
-                                                              [energy-api] ◄── REST clients
+[meter-hvac]     ──┐
+[meter-lighting]   ├──► MQTT ──► [energy-gateway] ──► [InfluxDB]
+[meter-plug]     ──┘    │              │                   │
+[solar-simulator] ───────┘         Rule Engine         [Grafana]
+                                       │
+                              [energy/{load}/load/command]
+                                       │
+                         [load-hvac / load-lighting / load-plug]
+                                       │
+                              publish status ──────────► [energy-gateway]
+                                                               │
+                                                         [energy-api]
+                                                         REST :8000
 ```
 
----
-
-## 📦 Danh sách service
-
-| Service | Image/Build | Port | Mô tả |
-|---------|-------------|------|--------|
-| `mosquitto` | eclipse-mosquitto:2.0 | 1883 | MQTT broker (có auth) |
-| `influxdb` | influxdb:2.7 | 8086 | Time-series database |
-| `grafana` | grafana/grafana:11.3.0 | 3000 | Dashboard monitoring |
-| `energy-gateway` | build | — | Gateway xử lý dữ liệu |
-| `energy-api` | build | 8000 | REST API |
-| `meter-hvac` | build | — | Smart meter HVAC |
-| `meter-lighting` | build | — | Smart meter Lighting |
-| `meter-plug` | build | — | Smart meter Plug |
-| `load-hvac` | build | — | Actuator HVAC |
-| `load-lighting` | build | — | Actuator Lighting |
-| `load-plug` | build | — | Actuator Plug |
-| `solar-simulator` | build | — | Solar power simulator |
+**Giao thức sử dụng:**
+- Meter → Gateway, Gateway → Actuator: **MQTT**
+- Gateway → InfluxDB, Grafana → InfluxDB: **HTTP**
+- Client → energy-api: **HTTP REST**
 
 ---
 
-## 🚀 Cách chạy hệ thống
+## 🚀 Chạy hệ thống
 
-### 1. Clone và cấu hình
+### Bước 1 — Chuẩn bị
 
 ```bash
-git clone <repo-url>
+git clone git@github.com:HangBich/smart-energy-gateway.git
 cd smart-energy-gateway
 cp .env.example .env
-# Chỉnh sửa .env nếu cần (mật khẩu, thresholds...)
 ```
 
-### 2. Khởi động toàn bộ stack
+File `.env` chứa toàn bộ cấu hình. Mặc định chạy được ngay, chỉ cần đổi nếu muốn thay mật khẩu.
+
+### Bước 2 — Khởi động
 
 ```bash
 docker compose up -d --build
 ```
 
-### 3. Kiểm tra trạng thái container
+Lần đầu build mất 2-3 phút. Sau đó chờ thêm ~30 giây để tất cả service healthy.
+
+### Bước 3 — Kiểm tra
 
 ```bash
 docker compose ps
 ```
 
-Tất cả container phải ở trạng thái `running` (trừ `mosquitto-init` là `exited 0`).
+Kết quả mong đợi — tất cả phải `running`, riêng `mosquitto-init` là `exited 0` (bình thường):
+
+```
+energy-api        Up (unhealthy → healthy sau ~30s)
+energy-gateway    Up (healthy)
+grafana           Up (healthy)
+influxdb          Up (healthy)
+load-hvac         Up
+load-lighting     Up
+load-plug         Up
+meter-hvac        Up (healthy)
+meter-lighting    Up (healthy)
+meter-plug        Up (healthy)
+mosquitto         Up (healthy)
+mosquitto-init    Exited (0)
+solar-simulator   Up
+```
 
 ---
 
-## 🔍 Kiểm tra log
+## 🌐 Truy cập
+
+| Service | URL | Tài khoản |
+|---------|-----|-----------|
+| **Grafana Dashboard** | http://localhost:3000 | admin / grafana_pass_2026 |
+| **InfluxDB** | http://localhost:8086 | admin / admin_pass_2026 |
+| **REST API** | http://localhost:8000 | — |
+| **API Docs (Swagger)** | http://localhost:8000/docs | — |
+
+### Lần đầu mở Grafana
+
+Grafana provision dashboard tự động. Nếu thấy **"No data"**, làm theo:
+
+1. Vào **Connections → Data sources → influxdb-1**
+2. Tắt toggle **"Basic auth"** (phải để OFF)
+3. Kéo xuống **InfluxDB Details**, điền:
+   - Organization: `smart-energy`
+   - Token: `energy-super-secret-token-2026`
+   - Default Bucket: `energy_data`
+4. Bấm **Save & test** → phải thấy `datasource is working`
+5. Vào dashboard → chọn `influxdb-1` ở dropdown **DS_INFLUXDB** góc trên trái
+
+---
+
+## 📡 MQTT Topics
+
+| Topic | Chiều | Mô tả |
+|-------|-------|--------|
+| `energy/{load}/meter/telemetry` | Meter → Gateway | Dữ liệu đo điện (power, current, voltage...) |
+| `energy/solar/telemetry` | Solar → Gateway | Công suất pin mặt trời |
+| `energy/{load}/load/command` | Gateway → Actuator | Lệnh bật/tắt |
+| `energy/{load}/load/status` | Actuator → Gateway | Phản hồi sau khi nhận lệnh |
+| `energy/gateway/summary` | Gateway → All | Tổng công suất mỗi 5 giây |
+| `energy/gateway/event` | Gateway → All | Sự kiện bất thường (overload, offline...) |
+| `energy/gateway/config` | API → Gateway | Cập nhật ngưỡng overload |
+
+**Subscribe để xem message realtime:**
 
 ```bash
-# Gateway (rule engine, events)
+# Xem tất cả
+docker compose exec mosquitto mosquitto_sub \
+  -u energy_user -P energy_pass123 -t "energy/#" -v
+
+# Chỉ xem event bất thường
+docker compose exec mosquitto mosquitto_sub \
+  -u energy_user -P energy_pass123 -t "energy/gateway/event" -v
+
+# Chỉ xem tổng công suất
+docker compose exec mosquitto mosquitto_sub \
+  -u energy_user -P energy_pass123 -t "energy/gateway/summary" -v
+```
+
+---
+
+## 🔌 REST API
+
+### Xem trạng thái
+
+```bash
+# Kiểm tra API còn chạy không
+curl http://localhost:8000/health
+
+# Danh sách 3 loads với switch và power hiện tại
+curl http://localhost:8000/loads
+
+# Chi tiết 1 load
+curl http://localhost:8000/loads/hvac/state
+curl http://localhost:8000/loads/lighting/state
+curl http://localhost:8000/loads/plug/state
+
+# Tổng quan điện năng (total/solar/grid/overload)
+curl http://localhost:8000/energy/summary
+
+# Xem events gần nhất
+curl http://localhost:8000/events
+```
+
+### Điều khiển thủ công
+
+```bash
+# Tắt một load
+curl -X POST http://localhost:8000/loads/plug/command \
+  -H "Content-Type: application/json" \
+  -d '{"action": "off", "reason": "manual_control"}'
+
+# Bật lại
+curl -X POST http://localhost:8000/loads/plug/command \
+  -H "Content-Type: application/json" \
+  -d '{"action": "on", "reason": "manual_restore"}'
+
+# Cập nhật ngưỡng overload (bonus endpoint)
+curl -X PUT http://localhost:8000/config/threshold \
+  -H "Content-Type: application/json" \
+  -d '{"threshold_watt": 4000}'
+```
+
+### Kích hoạt Load Switch Status trên Grafana
+
+Panel Load Switch Status cần actuator đã từng publish status. Chạy lệnh sau sau khi stack khởi động:
+
+```bash
+for load in hvac lighting plug; do
+  curl -s -X POST http://localhost:8000/loads/$load/command \
+    -H "Content-Type: application/json" \
+    -d '{"action": "on", "reason": "init_status"}' > /dev/null
+done
+echo "Done — chờ 10s rồi refresh Grafana"
+```
+
+---
+
+## 🔧 Rule Engine — 5 luật tự động
+
+Gateway chạy rule engine mỗi 5 giây (và ngay khi nhận telemetry mới):
+
+| # | Điều kiện | Hành động |
+|---|-----------|-----------|
+| 1 | Mọi lúc | Tính `total_power = Σ power_watt` của các load đang bật |
+| 2 | `total_power > 3500W` | Sinh event `overload_detected` |
+| 3 | Đang overload | Tắt load priority thấp nhất trước (low → medium, không tắt high) |
+| 4 | `solar_power > 500W` + có load bị tắt do overload | Bật lại load nếu projected power < 85% ngưỡng |
+| 5 | Meter không gửi data quá 30 giây | Sinh event `meter_offline` |
+
+---
+
+## 💉 Kiểm thử overload
+
+Inject dữ liệu công suất cao để trigger rule engine:
+
+```bash
+# Cần paho-mqtt
+pip install paho-mqtt
+
+# Inject overload (publish 3 round × 5s = 15s)
+python tests/inject_anomaly.py --scenario overload
+
+# Theo dõi gateway phản ứng
+docker compose logs -f energy-gateway | grep -E "overload|Command sent|Shedding|Event"
+```
+
+Script publish `hvac=2200W + lighting=900W + plug=1500W = 4600W` trong 15 giây — đủ để rule engine evaluate ít nhất 2 lần và trigger overload shedding.
+
+---
+
+## 🧪 Unit Tests
+
+```bash
+pip install pytest
+python -m pytest tests/ -v --tb=short
+```
+
+37 test case — không cần MQTT hay InfluxDB, chạy offline hoàn toàn.
+
+---
+
+## 📊 Kiểm tra dữ liệu InfluxDB
+
+Mở http://localhost:8086 → Data Explorer → Script Editor:
+
+```flux
+# Xem tất cả data 30 phút gần nhất
+from(bucket: "energy_data")
+  |> range(start: -30m)
+  |> limit(n: 10)
+
+# Xem công suất từng load
+from(bucket: "energy_data")
+  |> range(start: -30m)
+  |> filter(fn: (r) => r._measurement == "meter_telemetry")
+  |> filter(fn: (r) => r._field == "power_watt")
+
+# Xem events overload
+from(bucket: "energy_data")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "gateway_events")
+  |> filter(fn: (r) => r.event_type == "overload_detected")
+```
+
+**5 measurement trong bucket `energy_data`:**
+- `meter_telemetry` — power, current, voltage, energy_wh theo từng load
+- `solar_telemetry` — công suất solar và irradiance
+- `energy_summary` — total/solar/grid power, overload flag
+- `gateway_events` — events với severity và message
+- `load_status` — trạng thái bật/tắt từng load
+
+---
+
+## 🔍 Xem log
+
+```bash
+# Gateway — xem rule engine chạy, events, commands
 docker compose logs -f energy-gateway
 
-# REST API
+# API
 docker compose logs -f energy-api
 
-# Smart meter HVAC
+# Meter HVAC
 docker compose logs -f meter-hvac
-
-# Solar simulator
-docker compose logs -f solar-simulator
-
-# Load actuator
-docker compose logs -f load-hvac
 
 # Tất cả
 docker compose logs -f
@@ -117,164 +305,26 @@ docker compose logs -f
 
 ---
 
-## 🌐 Truy cập các service
-
-| Service | URL | Thông tin đăng nhập |
-|---------|-----|---------------------|
-| **Grafana** | http://localhost:3000 | admin / grafana_pass_2026 |
-| **InfluxDB** | http://localhost:8086 | admin / admin_pass_2026 |
-| **REST API** | http://localhost:8000 | — |
-| **API Docs** | http://localhost:8000/docs | Swagger UI |
-
----
-
-## 📡 MQTT Topics
-
-| Topic | Hướng | Mô tả |
-|-------|-------|--------|
-| `energy/{load}/meter/telemetry` | Meter → Gateway | Dữ liệu đo lường |
-| `energy/solar/telemetry` | Solar → Gateway | Công suất solar |
-| `energy/{load}/load/command` | Gateway → Actuator | Lệnh bật/tắt |
-| `energy/{load}/load/status` | Actuator → Gateway | Trạng thái sau lệnh |
-| `energy/gateway/summary` | Gateway → All | Tổng quan điện năng |
-| `energy/gateway/event` | Gateway → All | Event bất thường |
-| `energy/gateway/config` | API → Gateway | Cập nhật threshold |
-
----
-
-## 🔌 REST API
-
-### Kiểm tra sức khỏe
-```bash
-curl http://localhost:8000/health
-```
-
-### Danh sách tải điện
-```bash
-curl http://localhost:8000/loads
-```
-
-### Trạng thái tải cụ thể
-```bash
-curl http://localhost:8000/loads/hvac/state
-curl http://localhost:8000/loads/lighting/state
-curl http://localhost:8000/loads/plug/state
-```
-
-### Tổng quan điện năng
-```bash
-curl http://localhost:8000/energy/summary
-```
-
-### Xem tất cả events
-```bash
-curl http://localhost:8000/events
-```
-
-### Gửi lệnh điều khiển thủ công
-```bash
-# Tắt HVAC
-curl -X POST http://localhost:8000/loads/hvac/command \
-  -H "Content-Type: application/json" \
-  -d '{"action": "off", "reason": "manual_control"}'
-
-# Bật lại Plug
-curl -X POST http://localhost:8000/loads/plug/command \
-  -H "Content-Type: application/json" \
-  -d '{"action": "on", "reason": "manual_control"}'
-```
-
-### Cập nhật ngưỡng overload (bonus)
-```bash
-curl -X PUT http://localhost:8000/config/threshold \
-  -H "Content-Type: application/json" \
-  -d '{"threshold_watt": 4000}'
-```
-
----
-
-## 🧪 Chạy unit test
-
-```bash
-pip install -r tests/requirements-test.txt
-python -m pytest tests/ -v --tb=short
-```
-
-Với coverage:
-```bash
-python -m pytest tests/ -v --cov=energy_gateway --cov-report=term-missing
-```
-
----
-
-## 💉 Inject dữ liệu bất thường (kiểm thử)
-
-```bash
-# Từ máy host (cần paho-mqtt)
-pip install paho-mqtt
-python tests/inject_anomaly.py --scenario overload
-
-# Hoặc tất cả scenarios
-python tests/inject_anomaly.py --scenario all
-
-# Từ trong container gateway
-docker compose exec energy-gateway python /dev/stdin < tests/inject_anomaly.py
-```
-
----
-
-## 📊 InfluxDB — Kiểm tra dữ liệu
-
-Truy cập http://localhost:8086, đăng nhập `admin / admin_pass_2026`.
-
-**Measurements:**
-- `meter_telemetry` — power, current, voltage theo load_id
-- `solar_telemetry` — công suất solar + irradiance
-- `energy_summary` — total/solar/grid power, overload flag
-- `gateway_events` — events với severity, event_type
-- `load_status` — trạng thái switch từng tải
-
-**Flux query ví dụ (Data Explorer):**
-```flux
-from(bucket: "energy_data")
-  |> range(start: -30m)
-  |> filter(fn: (r) => r._measurement == "energy_summary")
-  |> filter(fn: (r) => r._field == "total_power_watt")
-```
-
----
-
-## 🔧 Rule Engine — Luật xử lý
-
-| # | Điều kiện | Hành động |
-|---|-----------|-----------|
-| 1 | `total_power > 3500W` | Sinh event `overload_detected` |
-| 2 | Overload detected | Tắt tải priority thấp trước (plug, hvac trước lighting) |
-| 3 | `solar_power > 500W` & có tải bị tắt do overload | Khôi phục tải (restore) |
-| 4 | `solar_power > 500W` & projected < 85% threshold | Bật lại tải đã shed |
-| 5 | Meter không gửi data `> 30s` | Sinh event `meter_offline` |
-
----
-
 ## ❗ Lỗi thường gặp
 
-| Lỗi | Nguyên nhân | Giải pháp |
-|-----|-------------|-----------|
-| Container `mosquitto` ở trạng thái `restarting` | `mosquitto-init` chưa chạy xong | Chờ 30s hoặc `docker compose restart mosquitto` |
-| `energy-gateway` không connect MQTT | MQTT chưa sẵn sàng | Gateway có retry tự động, chờ thêm 30s |
-| InfluxDB không có data | Token sai | Kiểm tra `.env` — `INFLUXDB_TOKEN` phải khớp `INFLUXDB_ADMIN_TOKEN` |
-| Grafana dashboard trắng | InfluxDB chưa có data | Chờ 1-2 phút sau khi stack khởi động |
-| API trả về `503 MQTT unreachable` | MQTT broker down | `docker compose restart mosquitto` |
+| Triệu chứng | Nguyên nhân | Cách sửa |
+|-------------|-------------|----------|
+| Grafana hiển thị "No data" | Basic auth đang bật trong datasource | Tắt Basic auth trong Connections → Data sources → Save & test |
+| `energy-api` unhealthy | File state chưa được tạo | Chờ 30s sau khi gateway healthy |
+| Mosquitto restart liên tục | `mosquitto-init` chưa tạo xong file passwd | Chờ 30s hoặc `docker compose restart mosquitto` |
+| Gateway không kết nối được MQTT | Mosquitto chưa healthy | Gateway tự retry, chờ thêm 30s |
+| Inject overload không trigger event | Meter thật đang ghi đè state | Script đã fix — publish 3 lần × 5s để đảm bảo rule engine evaluate |
+| Load Switch Status "No data" | Actuator chưa publish status lần nào | Gửi manual command đến 3 loads (xem phần REST API) |
 
 ---
 
 ## 🛑 Dừng hệ thống
 
 ```bash
-# Dừng nhưng giữ data volumes
+# Dừng nhưng giữ data (khởi động lại vẫn còn data cũ)
 docker compose down
 
-# Dừng và xóa toàn bộ data
+# Dừng và xóa sạch toàn bộ data
 docker compose down -v
 ```
 
@@ -284,69 +334,69 @@ docker compose down -v
 
 ```
 smart-energy-gateway/
-├── docker-compose.yml
+├── docker-compose.yml          ← định nghĩa 12 service
 ├── .env                        ← cấu hình (copy từ .env.example)
-├── .env.example
+├── .env.example                ← template cấu hình
 ├── README.md
 ├── mosquitto/
 │   └── config/
-│       └── mosquitto.conf      ← MQTT auth config
+│       └── mosquitto.conf      ← cấu hình MQTT auth
 ├── smart_meter/
-│   ├── meter.py                ← smart meter simulator
+│   ├── meter.py                ← giả lập đồng hồ điện
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── load_actuator/
-│   ├── actuator.py             ← load actuator simulator
+│   ├── actuator.py             ← giả lập công tắc điện
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── solar_simulator/
-│   ├── solar.py                ← solar PV simulator
+│   ├── solar.py                ← giả lập pin mặt trời
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── energy_gateway/
-│   ├── gateway.py              ← main gateway logic
-│   ├── rule_engine.py          ← rule engine (5+ rules)
-│   ├── state_store.py          ← thread-safe state + persistence
+│   ├── gateway.py              ← gateway chính (subscribe, validate, dispatch)
+│   ├── rule_engine.py          ← 5 luật xử lý tự động
+│   ├── state_store.py          ← lưu trạng thái thread-safe + persist JSON
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── energy_api/
-│   ├── api.py                  ← FastAPI REST API
+│   ├── api.py                  ← REST API FastAPI
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── grafana/
 │   └── provisioning/
-│       ├── datasources/influxdb.yml
+│       ├── datasources/
+│       │   └── influxdb.yml    ← auto-config datasource
 │       └── dashboards/
 │           ├── dashboard.yml
-│           └── energy_dashboard.json
+│           └── energy_dashboard.json   ← 8 panels
 └── tests/
-    ├── test_rule_engine.py     ← unit tests rule engine
-    ├── test_state_store.py     ← unit tests state store
-    ├── inject_anomaly.py       ← script inject dữ liệu bất thường
+    ├── test_rule_engine.py     ← 25 unit tests
+    ├── test_state_store.py     ← 12 unit tests
+    ├── inject_anomaly.py       ← script test overload/solar/zero
     └── requirements-test.txt
 ```
 
 ---
 
-## 👥 Phân công công việc
+## 👥 Phân công
 
 | Thành viên | Nhiệm vụ |
 |------------|----------|
-| Thành viên 1 | Smart meter simulator, Load actuator, Solar simulator, thiết kế MQTT topics & message format |
-| Thành viên 2 | Energy Gateway, Rule Engine, InfluxDB integration, State Store |
-| Thành viên 3 | REST API (FastAPI), Docker Compose, Grafana dashboard, README, unit tests, tích hợp toàn bộ |
+| Vũ Khương Duy | `smart_meter/`, `load_actuator/`, `solar_simulator/` — thiết kế MQTT topics và message format |
+| Trần Hoàng Long | `energy_gateway/` — gateway, rule engine, InfluxDB integration, state store |
+| Nguyễn Thị Bich Hằng | `energy_api/`, `docker-compose.yml`, Grafana dashboard, README, unit tests |
 
 ---
 
 ## ✅ Checklist trước khi nộp
 
-- [ ] `docker compose up -d --build` không báo lỗi
+- [ ] `docker compose up -d --build` không có lỗi
 - [ ] `docker compose ps` — tất cả container `running`
-- [ ] `docker compose logs -f energy-gateway` — thấy rule evaluation mỗi 5s
-- [ ] Grafana http://localhost:3000 — dashboard hiển thị data
-- [ ] InfluxDB http://localhost:8086 — có data trong `energy_data` bucket
+- [ ] Grafana http://localhost:3000 — dashboard hiển thị đồ thị có data
+- [ ] Panel **Load Switch Status** hiển thị ON (sau khi gửi init command)
+- [ ] InfluxDB http://localhost:8086 — có data trong 5 measurement
 - [ ] `curl http://localhost:8000/loads` — trả về 3 loads
-- [ ] `curl -X POST http://localhost:8000/loads/plug/command -H "Content-Type: application/json" -d '{"action":"off","reason":"test"}'` — thành công
-- [ ] `python tests/inject_anomaly.py --scenario overload` — trigger overload events
-- [ ] `python -m pytest tests/ -v` — tất cả test pass
-# smart-energy-gateway
+- [ ] `curl -X POST http://localhost:8000/loads/plug/command -d '{"action":"off","reason":"test"}' -H "Content-Type: application/json"` — thành công
+- [ ] `python tests/inject_anomaly.py --scenario overload` — gateway log thấy `overload=True` và `Command sent`
+- [ ] `python -m pytest tests/ -v` — 37 tests passed

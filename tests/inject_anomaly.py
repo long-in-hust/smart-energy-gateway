@@ -27,9 +27,13 @@ def ts():
 
 
 def connect():
-    client = mqtt.Client(
-        client_id="anomaly-injector",
-    )
+    try:
+        client = mqtt.Client(
+            client_id="anomaly-injector",
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        )
+    except AttributeError:
+        client = mqtt.Client(client_id="anomaly-injector")
     client.username_pw_set(MQTT_USER, MQTT_PASS)
     client.connect(MQTT_BROKER, MQTT_PORT)
     client.loop_start()
@@ -38,27 +42,36 @@ def connect():
 
 
 def scenario_overload(client: mqtt.Client):
-    """Publish extremely high power to trigger overload shedding."""
-    print("🔴 Injecting OVERLOAD scenario (all loads at 150% power)…")
-    for load_id, device_id, power in [
+    """Publish extremely high power to trigger overload shedding.
+    Publishes repeatedly for 15s so rule engine (runs every 5s) evaluates at least twice.
+    """
+    loads = [
         ("hvac",     "meter-hvac",     2200.0),
         ("lighting", "meter-lighting",  900.0),
         ("plug",     "meter-plug",     1500.0),
-    ]:
-        payload = {
-            "device_id":      device_id,
-            "load_id":        load_id,
-            "voltage":        220.0,
-            "current_ampere": round(power / 220.0, 2),
-            "power_watt":     power,
-            "energy_wh":      100.0,
-            "priority":       "low",
-            "switch":         "on",
-            "timestamp":      ts(),
-        }
-        topic = f"energy/{load_id}/meter/telemetry"
-        client.publish(topic, json.dumps(payload))
-        print(f"  ✓ {topic}: {power}W")
+    ]
+    print("🔴 Injecting OVERLOAD scenario (all loads at 150% power)…")
+    print("  Publishing repeatedly for 15s so rule engine can evaluate…")
+
+    for repeat in range(3):  # publish 3 rounds, 5s apart → rule engine catches at least 2
+        for load_id, device_id, power in loads:
+            payload = {
+                "device_id":      device_id,
+                "load_id":        load_id,
+                "voltage":        220.0,
+                "current_ampere": round(power / 220.0, 2),
+                "power_watt":     power,
+                "energy_wh":      100.0,
+                "priority":       "low",
+                "switch":         "on",
+                "timestamp":      ts(),
+            }
+            topic = f"energy/{load_id}/meter/telemetry"
+            client.publish(topic, json.dumps(payload))
+        print(f"  ✓ Round {repeat+1}/3: hvac=2200W lighting=900W plug=1500W (total=4600W)")
+        if repeat < 2:
+            time.sleep(5)  # wait for rule engine tick before next round
+
     print("  Total injected: 4600W → should trigger overload_detected + shedding")
 
 
@@ -116,7 +129,7 @@ def main():
 
     if args.scenario in ("overload", "all"):
         scenario_overload(client)
-        time.sleep(2)
+        time.sleep(8)  # wait for rule engine to evaluate after last publish
 
     if args.scenario in ("solar", "all"):
         scenario_solar(client)
