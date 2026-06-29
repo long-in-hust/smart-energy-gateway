@@ -251,7 +251,7 @@ pip install pytest
 python -m pytest tests/ -v --tb=short
 ```
 
-37 test case — không cần MQTT hay InfluxDB, chạy offline hoàn toàn.
+29 test case — không cần MQTT hay InfluxDB, chạy offline hoàn toàn.
 
 ---
 
@@ -388,15 +388,3 @@ smart-energy-gateway/
 | Nguyễn Thị Bich Hằng | `energy_api/`, `docker-compose.yml`, Grafana dashboard, README, unit tests |
 
 ---
-
-## ✅ Checklist trước khi nộp
-
-- [ ] `docker compose up -d --build` không có lỗi
-- [ ] `docker compose ps` — tất cả container `running`
-- [ ] Grafana http://localhost:3000 — dashboard hiển thị đồ thị có data
-- [ ] Panel **Load Switch Status** hiển thị ON (sau khi gửi init command)
-- [ ] InfluxDB http://localhost:8086 — có data trong 5 measurement
-- [ ] `curl http://localhost:8000/loads` — trả về 3 loads
-- [ ] `curl -X POST http://localhost:8000/loads/plug/command -d '{"action":"off","reason":"test"}' -H "Content-Type: application/json"` — thành công
-- [ ] `python tests/inject_anomaly.py --scenario overload` — gateway log thấy `overload=True` và `Command sent`
-- [ ] `python -m pytest tests/ -v` — 37 tests passed
