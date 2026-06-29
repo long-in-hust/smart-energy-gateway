@@ -2,7 +2,7 @@
   "title": "Smart Energy Management Gateway",
   "uid": "smart-energy-main",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "time": { "from": "now-30m", "to": "now" },
   "panels": [
@@ -24,7 +24,28 @@
               { "color": "red", "value": 3500 }
             ]
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "total_power_watt" },
+            "properties": [
+              { "id": "color", "value": { "mode": "thresholds" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "solar_power_watt" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#F9C74F", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "grid_power_watt" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#4287f5", "mode": "fixed" } }
+            ]
+          }
+        ]
       },
       "targets": [
         {
@@ -32,7 +53,11 @@
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
           "query": "from(bucket: \"energy_data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"energy_summary\")\n  |> filter(fn: (r) => r._field == \"total_power_watt\" or r._field == \"solar_power_watt\" or r._field == \"grid_power_watt\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
         }
-      ]
+      ],
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
     },
     {
       "id": 2,
@@ -81,9 +106,21 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "✅ Normal", "color": "green" }, "1": { "text": "⚠️ OVERLOAD", "color": "red" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "✅ Normal",   "color": "green" },
+                "1": { "text": "⚠️ OVERLOAD", "color": "red" }
+              }
+            }
           ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red",   "value": 1 }
+            ]
+          }
         }
       },
       "targets": [
@@ -104,7 +141,14 @@
         "defaults": {
           "unit": "watt",
           "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2000 }, { "color": "red", "value": 3000 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 2000 },
+              { "color": "red",    "value": 3000 }
+            ]
+          }
         }
       },
       "targets": [
@@ -124,19 +168,35 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "OFF", "color": "red" }, "1": { "text": "ON", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "OFF", "color": "red"   },
+                "1": { "text": "ON",  "color": "green" }
+              }
+            }
           ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
         }
       },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"energy_data\")\n  |> range(start: -1m)\n  |> filter(fn: (r) => r._measurement == \"load_status\" and r._field == \"switch\")\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.load_id }))"
+          "query": "from(bucket: \"energy_data\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"load_status\" and r._field == \"switch\")\n  |> last()\n  |> map(fn: (r) => ({ r with _field: r.load_id }))"
         }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "orientation": "horizontal" }
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "orientation": "horizontal"
+      }
     },
     {
       "id": 7,
@@ -166,7 +226,25 @@
       "fieldConfig": {
         "defaults": { "custom": { "displayMode": "color-text" } },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "severity" }, "properties": [{ "id": "custom.displayMode", "value": "color-background" }, { "id": "mappings", "value": [{ "type": "value", "options": { "critical": { "color": "red", "index": 0 }, "warning": { "color": "yellow", "index": 1 }, "info": { "color": "green", "index": 2 } } }] }] }
+          {
+            "matcher": { "id": "byName", "options": "severity" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": { "color": "red",    "index": 0 },
+                      "warning":  { "color": "yellow", "index": 1 },
+                      "info":     { "color": "green",  "index": 2 }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
         ]
       },
       "targets": [

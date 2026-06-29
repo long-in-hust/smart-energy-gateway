@@ -76,8 +76,30 @@ def scenario_overload(client: mqtt.Client):
 
 
 def scenario_solar(client: mqtt.Client):
-    """Simulate high solar output to trigger load restoration."""
     print("☀️  Injecting HIGH SOLAR scenario (1400W solar)…")
+    
+    # Reset lighting và plug về 0W để total về thấp
+    for load_id, device_id in [
+        ("lighting", "meter-lighting"),
+        ("plug",     "meter-plug"),
+    ]:
+        payload = {
+            "device_id":      device_id,
+            "load_id":        load_id,
+            "voltage":        220.0,
+            "current_ampere": 0.0,
+            "power_watt":     0.0,
+            "energy_wh":      0.0,
+            "priority":       "low",
+            "switch":         "on",
+            "timestamp":      ts(),
+        }
+        client.publish(f"energy/{load_id}/meter/telemetry", json.dumps(payload))
+    
+    print("  ✓ Reset lighting=0W, plug=0W")
+    time.sleep(6)  # chờ gateway cập nhật state
+    
+    # Inject solar cao
     payload = {
         "device_id":      "solar-simulator",
         "power_watt":     1400.0,
@@ -87,8 +109,7 @@ def scenario_solar(client: mqtt.Client):
     }
     client.publish("energy/solar/telemetry", json.dumps(payload))
     print("  ✓ energy/solar/telemetry: 1400W")
-    print("  Gateway should attempt to restore shed loads")
-
+    print("  Gateway should restore shed loads")
 
 def scenario_zero_power(client: mqtt.Client):
     """Simulate a meter going to 0W (device may have gone offline)."""

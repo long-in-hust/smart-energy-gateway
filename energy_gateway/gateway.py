@@ -232,6 +232,21 @@ class EnergyGateway:
         self.store.update_load_switch(load_id, switch, reason)
         if self._write_api:
             write_load_status(self._write_api, data)
+            # Nếu load bị tắt → ghi power=0 vào meter_telemetry
+            if switch == "off":
+                from influxdb_client import Point
+                p = (
+                    Point("meter_telemetry")
+                    .tag("load_id", load_id)
+                    .tag("device_id", f"meter-{load_id}")
+                    .tag("priority", self.store.get_meter_states().get(load_id, {}).get("priority", "low"))
+                    .field("power_watt", 0.0)
+                    .field("switch", 0)
+                )
+                try:
+                    self._write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=p)
+                except Exception as exc:
+                    logger.warning("Failed to write zero power: %s", exc)
         logger.info("Load status: %s switch=%s reason=%s", load_id, switch, reason)
 
     # ── Rule evaluation loop ──────────────────────────────────────────────────
@@ -302,20 +317,25 @@ class EnergyGateway:
             age = now - last
             if age > METER_OFFLINE_TIMEOUT:
                 ev_dict = {
-                    "event_type":  "meter_offline",
-                    "severity":    "critical",
-                    "value":       round(age, 1),
-                    "threshold":   float(METER_OFFLINE_TIMEOUT),
-                    "message":     f"Meter {load_id} offline for {age:.0f}s",
+                    "event_type":   "meter_offline",
+                    "severity":     "critical",
+                    "value":        round(age, 1),
+                    "threshold":    float(METER_OFFLINE_TIMEOUT),
+                    "message":      f"Meter {load_id} offline for {age:.0f}s",
                     "action_taken": "",
-                    "load_id":     load_id,
-                    "timestamp":   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "load_id":      load_id,
+                    "timestamp":    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 }
-                # Only raise once per offline period (rate-limit)
+                # Rate-limit: chỉ sinh event mỗi 60s
                 existing = self.store.get_events(load_id=load_id, limit=5)
-                recent_offline = [e for e in existing
-                                  if e["event_type"] == "meter_offline"
-                                  and (now - 60) < age]
+                recent_offline = [
+                    e for e in existing
+                    if e["event_type"] == "meter_offline"
+                    and (now - 60) < datetime.fromisoformat(
+                        e["timestamp"].replace("Z", "+00:00")
+                    ).timestamp()
+                ]
+                    
                 if not recent_offline:
                     self.store.add_event(ev_dict)
                     self._mqtt.publish(TOPIC_EVENT, json.dumps(ev_dict))
